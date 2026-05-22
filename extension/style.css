@@ -577,3 +577,101 @@ footer {
   letter-spacing: 0.1em;
   margin-top: 8px;
 }
+
+/* ── Gatekeeper: Consent Violation Alert ─────────────────────── */
+@keyframes pulseViolation {
+  0%, 100% {
+    box-shadow: 0 0 8px var(--clr-red), 0 0 20px var(--clr-red);
+    border-color: rgba(255, 0, 60, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--clr-red), 0 0 45px var(--clr-red), 0 0 70px rgba(255, 0, 60, 0.4);
+    border-color: var(--clr-red);
+  }
+}
+
+.violation-alert {
+  background: rgba(255, 0, 60, 0.12);
+  border: 1px solid rgba(255, 0, 60, 0.6);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  animation: pulseViolation 1.6s ease-in-out infinite;
+}
+
+.violation-alert__inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.violation-alert__icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--clr-red);
+  filter: drop-shadow(0 0 4px var(--clr-red));
+  margin-top: 1px;
+}
+
+.violation-alert__title {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--clr-red);
+  text-shadow: 0 0 6px var(--clr-red);
+  margin-bottom: 4px;
+}
+
+.violation-alert__detail {
+  font-family: var(--font-sans);
+  font-size: 0.73rem;
+  color: #fca5a5;
+  line-height: 1.5;
+}
+
+/* ── Gatekeeper: Consent Textarea ────────────────────────────── */
+.consent-textarea {
+  width: 100%;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--txt-primary);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  padding: 9px 11px;
+  resize: vertical;
+  min-height: 62px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  outline: none;
+}
+
+.consent-textarea::placeholder {
+  color: var(--txt-dimmer);
+  font-style: italic;
+}
+
+.consent-textarea:focus {
+  border-color: var(--clr-green);
+  box-shadow: 0 0 0 2px rgba(184, 255, 20, 0.15);
+}
+
+.consent-hint {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--txt-dimmer);
+  letter-spacing: 0.06em;
+  margin-top: 6px;
+}
+
+/* ── Gatekeeper: "Saved ✓" flash badge ───────────────────────── */
+.persona-saved-badge {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--clr-green);
+  text-shadow: 0 0 6px var(--clr-green);
+  animation: fadeInUp 0.2s ease-out;
+}

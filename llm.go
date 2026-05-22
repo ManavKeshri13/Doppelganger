@@ -31,9 +31,11 @@ import (
 
 // AnalysisPayload is the canonical structure the LLM returns for every scan.
 type AnalysisPayload struct {
-	RiskScore    int      `json:"risk_score"`
-	DarkPatterns []string `json:"dark_patterns"`
-	Summary      string   `json:"summary"`
+	RiskScore        int      `json:"risk_score"`
+	DarkPatterns     []string `json:"dark_patterns"`
+	Summary          string   `json:"summary"`
+	ConsentViolated  bool     `json:"consent_violated"`
+	ViolationDetails string   `json:"violation_details"`
 }
 
 // ---------------------------------------------------------------------------
@@ -42,8 +44,11 @@ type AnalysisPayload struct {
 
 // buildSystemPrompt returns the instruction that tells the LLM exactly what
 // to look for and what JSON structure to produce.
-func buildSystemPrompt() string {
-	return `You are an expert in digital privacy, UX ethics, and consumer protection.
+// If consentRules is non-empty the Gatekeeper section is appended, instructing
+// the model to cross-reference the site's data harvesting against the user's
+// personal privacy boundaries.
+func buildSystemPrompt(consentRules string) string {
+	base := `You are an expert in digital privacy, UX ethics, and consumer protection.
 Your task is to analyse the text content of a webpage and identify "dark patterns"
 and privacy risks present in the content.
 
@@ -65,23 +70,52 @@ STRICT RULES:
    {
      "risk_score": <integer 1-10, where 1 = very safe, 10 = extremely manipulative>,
      "dark_patterns": ["<pattern 1>", "<pattern 2>", ...],
-     "summary": "<A 1-3 sentence plain-English summary of the key privacy risks and manipulative techniques found>"
+     "summary": "<A 1-3 sentence plain-English summary of the key privacy risks and manipulative techniques found>",
+     "consent_violated": <true | false>,
+     "violation_details": "<If consent_violated is true, explain exactly which boundary was crossed and how. Empty string if false.>"
    }
 3. If no dark patterns are found, return an empty array for dark_patterns and a risk_score of 1-2.
 4. Be specific and factual — only flag patterns you can directly infer from the text.
 5. Do NOT include anything outside the JSON object.`
+
+	if consentRules == "" {
+		// No personal rules provided — consent fields default to safe values
+		base += `
+6. Since no personal consent rules were provided by the user, always set:
+   "consent_violated": false,
+   "violation_details": ""`
+		return base
+	}
+
+	base += fmt.Sprintf(`
+
+== GATEKEEPER: PERSONAL CONSENT RULES ==
+The user has defined the following personal privacy boundaries:
+"""
+%s
+"""
+
+You MUST perform a Gatekeeper check:
+- Read the page text carefully for any data the site is collecting, requiring, or attempting to harvest.
+- Cross-reference that data against the user's consent rules above.
+- If the site requests, requires, or harvests ANY data type that the user has explicitly stated they do NOT consent to sharing, set "consent_violated" to true.
+- In "violation_details", describe specifically: (a) what data the site is trying to collect, and (b) which exact rule from the user's list it violates.
+- If no boundary is crossed, set "consent_violated" to false and "violation_details" to "".`, consentRules)
+
+	return base
 }
 
 // ---------------------------------------------------------------------------
 // Main exported function
 // ---------------------------------------------------------------------------
 
-// AnalyzePage calls the Groq API with the given page text and returns a
-// populated AnalysisPayload describing detected dark patterns and privacy risks.
-func AnalyzePage(cfg *Config, pageText string) (*AnalysisPayload, error) {
+// AnalyzePage calls the Groq API with the given page text and optional
+// consentRules and returns a populated AnalysisPayload.
+// When consentRules is non-empty the Gatekeeper check is activated.
+func AnalyzePage(cfg *Config, pageText, consentRules string) (*AnalysisPayload, error) {
 	log.Printf("[LLM] Requesting dark-pattern analysis from Groq (model: llama-3.3-70b-versatile)")
-	log.Printf("[LLM] Page text length: %d chars", len(pageText))
-	return callGroq(cfg, pageText)
+	log.Printf("[LLM] Page text length: %d chars | Consent rules provided: %v", len(pageText), consentRules != "")
+	return callGroq(cfg, pageText, consentRules)
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +159,7 @@ type groqResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func callGroq(cfg *Config, pageText string) (*AnalysisPayload, error) {
+func callGroq(cfg *Config, pageText, consentRules string) (*AnalysisPayload, error) {
 	// Truncate page text to stay within token limits
 	if len(pageText) > maxPageTextChars {
 		pageText = pageText[:maxPageTextChars] + "\n\n[... content truncated for analysis ...]"
@@ -136,7 +170,7 @@ func callGroq(cfg *Config, pageText string) (*AnalysisPayload, error) {
 		Messages: []groqMessage{
 			{
 				Role:    "system",
-				Content: buildSystemPrompt(),
+				Content: buildSystemPrompt(consentRules),
 			},
 			{
 				Role:    "user",
@@ -241,6 +275,7 @@ func parseAnalysisJSON(text string) (*AnalysisPayload, error) {
 	log.Printf("[LLM] ✓ Risk Score: %d/10", payload.RiskScore)
 	log.Printf("[LLM] ✓ Dark Patterns (%d): %v", len(payload.DarkPatterns), payload.DarkPatterns)
 	log.Printf("[LLM] ✓ Summary: %s", payload.Summary)
+	log.Printf("[LLM] ✓ Consent Violated: %v | Details: %s", payload.ConsentViolated, payload.ViolationDetails)
 
 	return &payload, nil
 }

@@ -1,58 +1,97 @@
 /**
- * popup.js — Project Aegis Chrome Extension
+ * popup.js — Project Aegis + Gatekeeper
  *
  * Responsibilities:
  *  - Poll GET /status every 2 s to keep the dashboard live.
- *  - Handle the "Scan Page Risks" button:
+ *  - Load / persist the user's consent rules via chrome.storage.local.
+ *  - Handle "Scan Page Risks":
  *      1. Extract document.body.innerText from the active tab via chrome.scripting
- *      2. POST the text to the backend's /analyze endpoint
- *  - Render Risk Score, Dark Patterns list, Summary, and connection health.
+ *      2. POST { page_text, consent_rules } to /analyze
+ *  - Render Risk Score, Dark Patterns, Summary, and the Gatekeeper
+ *    violation banner when consent boundaries are breached.
  *
- * MV3-compliant: no inline scripts, no eval, no external fetches
- * except the Go backend on localhost:8000 (declared in host_permissions).
+ * MV3-compliant: no inline scripts, no eval.
  */
 
 'use strict';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const API_BASE          = 'http://localhost:8000';
-const POLL_INTERVAL     = 2000; // ms
-const STATUS_ENDPOINT   = `${API_BASE}/status`;
-const ANALYZE_ENDPOINT  = `${API_BASE}/analyze`;
+const API_BASE         = 'http://localhost:8000';
+const POLL_INTERVAL    = 2000; // ms
+const STATUS_ENDPOINT  = `${API_BASE}/status`;
+const ANALYZE_ENDPOINT = `${API_BASE}/analyze`;
+const STORAGE_KEY      = 'aegis_consent_rules';
 
 // Risk score colour thresholds
-const RISK_LOW    = 3;  // score 1-3  → green
-const RISK_MEDIUM = 6;  // score 4-6  → orange
-                        // score 7-10 → red
+const RISK_LOW    = 3;  // 1-3  → green
+const RISK_MEDIUM = 6;  // 4-6  → orange
+                        // 7-10 → red
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 
 const $ = id => document.getElementById(id);
 
-const connDot     = $('conn-dot');
-const connLabel   = $('conn-label');
-const statusBadge = $('status-badge');
-const phaseBar    = $('phase-bar');
-const statRisk    = $('stat-risk');
-const statTotal   = $('stat-total');
-const summaryText = $('summary-text');
-const patternList = $('pattern-list');
-const errorPanel  = $('error-panel');
-const errorText   = $('error-text');
-const triggerBtn  = $('trigger-btn');
-const btnLabel    = $('btn-label');
-const btnIconIdle = $('btn-icon-idle');
-const btnIconSpin = $('btn-icon-spin');
+const connDot          = $('conn-dot');
+const connLabel        = $('conn-label');
+const statusBadge      = $('status-badge');
+const phaseBar         = $('phase-bar');
+const statRisk         = $('stat-risk');
+const statTotal        = $('stat-total');
+const consentRulesEl   = $('consent-rules');
+const personaSavedBadge = $('persona-saved-badge');
+const summaryText      = $('summary-text');
+const patternList      = $('pattern-list');
+const violationAlert   = $('violation-alert');
+const violationDetail  = $('violation-detail');
+const errorPanel       = $('error-panel');
+const errorText        = $('error-text');
+const triggerBtn       = $('trigger-btn');
+const btnLabel         = $('btn-label');
+const btnIconIdle      = $('btn-icon-idle');
+const btnIconSpin      = $('btn-icon-spin');
 
 // ─── App state ────────────────────────────────────────────────────────────────
 
-let isConnected    = false;
-let currentStatus  = 'idle';
+let isConnected   = false;
+let currentStatus = 'idle';
+
+// ─── Persist consent rules ────────────────────────────────────────────────────
+
+/** Load saved consent rules from chrome.storage.local on startup. */
+async function loadConsentRules() {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    if (result[STORAGE_KEY]) {
+      consentRulesEl.value = result[STORAGE_KEY];
+    }
+  } catch (_) {
+    // Storage unavailable — silently ignore
+  }
+}
+
+/** Save consent rules whenever the textarea loses focus or changes. */
+let saveTimer = null;
+consentRulesEl.addEventListener('input', () => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await chrome.storage.local.set({ [STORAGE_KEY]: consentRulesEl.value });
+      flashSavedBadge();
+    } catch (_) {}
+  }, 600); // debounce — save 600 ms after user stops typing
+});
+
+function flashSavedBadge() {
+  personaSavedBadge.classList.remove('hidden');
+  clearTimeout(flashSavedBadge._timer);
+  flashSavedBadge._timer = setTimeout(() => {
+    personaSavedBadge.classList.add('hidden');
+  }, 1800);
+}
 
 // ─── Polling ──────────────────────────────────────────────────────────────────
 
-/** Fetches /status and updates all UI elements. */
 async function pollStatus() {
   try {
     const res = await fetch(STATUS_ENDPOINT, {
@@ -68,9 +107,7 @@ async function pollStatus() {
     renderStatus(data);
   } catch (_err) {
     setConnected(false);
-    if (currentStatus === 'analyzing') {
-      renderBtnState('idle');
-    }
+    if (currentStatus === 'analyzing') renderBtnState('idle');
   }
 }
 
@@ -80,43 +117,48 @@ function renderStatus(data) {
 
   renderStatusBadge(data.status);
   renderPhaseBar(data.status);
-
-  // ── Risk Score ─────────────────────────────────────────────
   renderRiskScore(data.riskScore, data.status);
 
-  // ── Total Scans ────────────────────────────────────────────
   statTotal.textContent = data.totalScans ?? 0;
 
-  // ── Summary ────────────────────────────────────────────────
   renderSummary(data.summary, data.status);
-
-  // ── Dark Patterns ──────────────────────────────────────────
   renderPatternList(data.darkPatterns || []);
+  renderViolationAlert(data.consentViolated, data.violationDetails);
 
-  // ── Error ──────────────────────────────────────────────────
   if (data.status === 'error' && data.lastError) {
     showError(data.lastError);
   } else {
     hideError();
   }
 
-  // ── Button ─────────────────────────────────────────────────
   renderBtnState(data.status);
+}
+
+// ─── Consent Violation Alert ─────────────────────────────────────────────────
+
+function renderViolationAlert(violated, details) {
+  if (violated) {
+    violationDetail.textContent = details || 'A consent boundary was crossed by this page.';
+    violationAlert.classList.remove('hidden');
+  } else {
+    violationAlert.classList.add('hidden');
+    violationDetail.textContent = '';
+  }
 }
 
 // ─── Risk Score ───────────────────────────────────────────────────────────────
 
 function renderRiskScore(score, status) {
-  if (!score || status === 'idle' || status === 'analyzing') {
-    if (status === 'analyzing') {
-      statRisk.textContent = '…';
-      statRisk.style.color = 'var(--clr-cyan)';
-      statRisk.style.textShadow = '0 0 6px var(--clr-cyan)';
-    } else if (!score) {
-      statRisk.textContent = '—';
-      statRisk.style.color = 'var(--txt-muted)';
-      statRisk.style.textShadow = 'none';
-    }
+  if (status === 'analyzing') {
+    statRisk.textContent = '…';
+    statRisk.style.color = 'var(--clr-cyan)';
+    statRisk.style.textShadow = '0 0 6px var(--clr-cyan)';
+    return;
+  }
+  if (!score) {
+    statRisk.textContent = '—';
+    statRisk.style.color = 'var(--txt-muted)';
+    statRisk.style.textShadow = 'none';
     return;
   }
 
@@ -138,11 +180,10 @@ function renderRiskScore(score, status) {
 
 function renderSummary(summary, status) {
   if (status === 'analyzing') {
-    summaryText.textContent = '🔍 Analysing page content with Groq LLM…';
+    summaryText.textContent = '🔍 Analysing page with Groq LLM…';
     summaryText.classList.remove('persona-text--active');
     return;
   }
-
   if (summary) {
     summaryText.textContent = summary;
     summaryText.classList.add('persona-text--active');
@@ -171,7 +212,7 @@ function renderPatternList(patterns) {
 
     const txt = document.createElement('span');
     txt.className = 'query-item__text';
-    txt.textContent = p;   // textContent is XSS-safe
+    txt.textContent = p;
     txt.title = p;
 
     li.appendChild(idx);
@@ -264,9 +305,10 @@ function hideError() {
 triggerBtn.addEventListener('click', async () => {
   if (triggerBtn.disabled) return;
   hideError();
+  violationAlert.classList.add('hidden'); // reset previous violation
 
   // ── Step 1: Get the active tab ────────────────────────────────────────────
-  let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) {
     showError('Could not identify the active tab.');
     return;
@@ -301,12 +343,14 @@ triggerBtn.addEventListener('click', async () => {
     return;
   }
 
-  // ── Step 3: POST to /analyze ──────────────────────────────────────────────
+  // ── Step 3: POST to /analyze (with optional consent rules) ────────────────
+  const consentRules = consentRulesEl.value.trim();
+
   try {
     const res = await fetch(ANALYZE_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page_text: pageText }),
+      body: JSON.stringify({ page_text: pageText, consent_rules: consentRules }),
       signal: AbortSignal.timeout(8000),
     });
 
@@ -322,7 +366,7 @@ triggerBtn.addEventListener('click', async () => {
       return;
     }
 
-    // 202 Accepted — polling will pick up the results within ~5-10 s
+    // 202 Accepted — polling will deliver results within ~5-10 s
   } catch (err) {
     showError(`Could not reach backend: ${err.message}`);
     renderBtnState('idle');
@@ -333,5 +377,6 @@ triggerBtn.addEventListener('click', async () => {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
+loadConsentRules();
 pollStatus();
 setInterval(pollStatus, POLL_INTERVAL);

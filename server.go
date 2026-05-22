@@ -25,18 +25,21 @@ import (
 
 // StatusResponse is the JSON body returned by GET /status.
 type StatusResponse struct {
-	Status       string    `json:"status"`
-	RiskScore    int       `json:"riskScore"`
-	DarkPatterns []string  `json:"darkPatterns"`
-	Summary      string    `json:"summary"`
-	TotalScans   int       `json:"totalScans"`
-	LastScanTime time.Time `json:"lastScanTime"`
-	LastError    string    `json:"lastError,omitempty"`
+	Status           string    `json:"status"`
+	RiskScore        int       `json:"riskScore"`
+	DarkPatterns     []string  `json:"darkPatterns"`
+	Summary          string    `json:"summary"`
+	TotalScans       int       `json:"totalScans"`
+	LastScanTime     time.Time `json:"lastScanTime"`
+	ConsentViolated  bool      `json:"consentViolated"`
+	ViolationDetails string    `json:"violationDetails"`
+	LastError        string    `json:"lastError,omitempty"`
 }
 
 // AnalyzeRequest is the JSON body expected by POST /analyze.
 type AnalyzeRequest struct {
-	PageText string `json:"page_text"`
+	PageText     string `json:"page_text"`
+	ConsentRules string `json:"consent_rules"` // optional Gatekeeper rules
 }
 
 // AnalyzeResponse is the JSON body returned by POST /analyze.
@@ -156,7 +159,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[SERVER] /analyze received — page text: %d chars", len(req.PageText))
+	log.Printf("[SERVER] /analyze received — page text: %d chars | consent rules: %v", len(req.PageText), req.ConsentRules != "")
 
 	// Acknowledge immediately; analysis runs in background
 	writeJSON(w, http.StatusAccepted, AnalyzeResponse{
@@ -165,7 +168,7 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Run the LLM analysis in the background
-	go s.runAnalysisSession(req.PageText)
+	go s.runAnalysisSession(req.PageText, req.ConsentRules)
 }
 
 // ---------------------------------------------------------------------------
@@ -174,13 +177,13 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 
 // runAnalysisSession is the goroutine that:
 //  1. Marks state as "analyzing"
-//  2. Calls the LLM to detect dark patterns
+//  2. Calls the LLM to detect dark patterns and run the Gatekeeper check
 //  3. Stores the results back into EngineState
-func (s *Server) runAnalysisSession(pageText string) {
+func (s *Server) runAnalysisSession(pageText, consentRules string) {
 	log.Println("[ENGINE] 🔍 Starting dark-pattern analysis...")
 	s.state.SetAnalyzing()
 
-	payload, err := AnalyzePage(s.cfg, pageText)
+	payload, err := AnalyzePage(s.cfg, pageText, consentRules)
 	if err != nil {
 		log.Printf("[ENGINE] ❌ LLM error: %v", err)
 		s.state.SetError(err.Error())
@@ -188,8 +191,8 @@ func (s *Server) runAnalysisSession(pageText string) {
 	}
 
 	s.state.SetResults(payload)
-	log.Printf("[ENGINE] ✅ Analysis complete — risk score: %d/10, patterns found: %d",
-		payload.RiskScore, len(payload.DarkPatterns))
+	log.Printf("[ENGINE] ✅ Analysis complete — risk score: %d/10, patterns found: %d, consent violated: %v",
+		payload.RiskScore, len(payload.DarkPatterns), payload.ConsentViolated)
 }
 
 // ---------------------------------------------------------------------------

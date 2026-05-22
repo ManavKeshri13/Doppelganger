@@ -43,6 +43,14 @@ type EngineState struct {
 	// TotalScans is the cumulative count of page analyses performed.
 	TotalScans int
 
+	// ConsentViolated flags whether the last scan detected a breach of the
+	// user's personal consent rules (Gatekeeper feature).
+	ConsentViolated bool
+
+	// ViolationDetails is the plain-English explanation of which consent
+	// boundary was crossed and how. Empty when ConsentViolated is false.
+	ViolationDetails string
+
 	// LastError stores the most recent error message (empty if none).
 	LastError string
 }
@@ -83,6 +91,8 @@ func (s *EngineState) SetResults(payload *AnalysisPayload) {
 	s.DarkPatterns = patterns
 
 	s.Summary = payload.Summary
+	s.ConsentViolated = payload.ConsentViolated
+	s.ViolationDetails = payload.ViolationDetails
 }
 
 // SetError records an error and transitions to the error phase.
@@ -102,12 +112,14 @@ func (s *EngineState) Snapshot() StatusResponse {
 	copy(patterns, s.DarkPatterns)
 
 	return StatusResponse{
-		Status:       string(s.Status),
-		RiskScore:    s.RiskScore,
-		DarkPatterns: patterns,
-		Summary:      s.Summary,
-		LastScanTime: s.LastScanTime,
-		TotalScans:   s.TotalScans,
-		LastError:    s.LastError,
+		Status:           string(s.Status),
+		RiskScore:        s.RiskScore,
+		DarkPatterns:     patterns,
+		Summary:          s.Summary,
+		LastScanTime:     s.LastScanTime,
+		TotalScans:       s.TotalScans,
+		ConsentViolated:  s.ConsentViolated,
+		ViolationDetails: s.ViolationDetails,
+		LastError:        s.LastError,
 	}
 }

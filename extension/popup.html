@@ -32,6 +32,20 @@
   <!-- ═══════════════════════════════════════════════════════════ -->
   <main>
 
+    <!-- ─── CONSENT VIOLATION ALERT (hidden by default) ──────── -->
+    <section class="violation-alert hidden" id="violation-alert" role="alert" aria-live="assertive">
+      <div class="violation-alert__inner">
+        <!-- Alert icon -->
+        <svg class="violation-alert__icon" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+          <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+        </svg>
+        <div>
+          <p class="violation-alert__title">⚠ CONSENT BOUNDARY VIOLATED</p>
+          <p class="violation-alert__detail" id="violation-detail">—</p>
+        </div>
+      </div>
+    </section>
+
     <!-- ─── STATUS CARD ──────────────────────────────────────── -->
     <section class="card" aria-label="Engine status">
       <div class="card__header">
@@ -55,6 +69,29 @@
           <p class="stat-value" id="stat-total">0</p>
         </div>
       </div>
+    </section>
+
+    <!-- ─── MY SOVEREIGN PERSONA ─────────────────────────────── -->
+    <section class="card" aria-label="Personal consent rules">
+      <div class="card__header">
+        <h2 class="card__title">
+          <!-- Lock icon -->
+          <svg class="card__title-icon text-green" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+            <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
+          </svg>
+          My Sovereign Persona
+        </h2>
+        <span class="persona-saved-badge hidden" id="persona-saved-badge">Saved ✓</span>
+      </div>
+      <textarea
+        id="consent-rules"
+        class="consent-textarea"
+        rows="3"
+        maxlength="800"
+        placeholder="I consent to share my age and general city, but never my precise location, email, or income."
+        aria-label="Personal consent rules for the Gatekeeper"
+      ></textarea>
+      <p class="consent-hint">The Gatekeeper will alert you if this page violates your rules.</p>
     </section>
 
     <!-- ─── DATA HARVESTING SUMMARY ──────────────────────────── -->
@@ -119,7 +156,7 @@
       <span id="btn-label">Scan Page Risks</span>
     </button>
 
-    <p class="version-tag">v2.0.0 · Project Aegis · localhost:8000 · MV3</p>
+    <p class="version-tag">v2.1.0 · Project Aegis + Gatekeeper · MV3</p>
   </footer>
 
   <script src="popup.js"></script>
