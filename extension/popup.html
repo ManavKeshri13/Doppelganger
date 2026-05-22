@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Doppelgänger</title>
+  <!-- Local CSS only — no external scripts, no inline scripts, MV3-compliant -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  TOP BAR                                                    -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <header class="top-bar">
+    <div class="top-bar__brand">
+      <!-- Ghost icon -->
+      <svg class="top-bar__icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 2C7.03 2 3 6.03 3 11v9l3-2 3 2 3-2 3 2 3-2v-9c0-4.97-4.03-9-9-9zm-3 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm6 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
+      </svg>
+      <span class="top-bar__title">Doppelgänger</span>
+    </div>
+
+    <!-- Live connection indicator -->
+    <div class="conn-indicator" id="conn-indicator" aria-live="polite">
+      <span class="conn-dot" id="conn-dot"></span>
+      <span class="conn-label" id="conn-label">connecting…</span>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  MAIN CONTENT                                               -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <main>
+
+    <!-- ─── STATUS CARD ──────────────────────────────────────── -->
+    <section class="card" aria-label="Engine status">
+      <div class="card__header">
+        <h2 class="card__title">Engine Status</h2>
+        <span class="status-badge status-badge--idle" id="status-badge">IDLE</span>
+      </div>
+
+      <!-- Phase indicator bar -->
+      <div class="phase-bar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+        <div class="phase-bar-fill" id="phase-bar"></div>
+      </div>
+
+      <!-- Stat grid -->
+      <div class="stat-grid">
+        <div class="stat-box">
+          <p class="stat-label">Queries Injected</p>
+          <p class="stat-value" id="stat-total">0</p>
+        </div>
+        <div class="stat-box">
+          <p class="stat-label">Last Trigger</p>
+          <p class="stat-value stat-value--sm" id="stat-time">—</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── ACTIVE PERSONA ────────────────────────────────────── -->
+    <section class="card" aria-label="Active persona">
+      <div class="card__header">
+        <h2 class="card__title">
+          <!-- User icon -->
+          <svg class="card__title-icon text-cyan" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
+          </svg>
+          Active Persona
+        </h2>
+      </div>
+      <p class="persona-text" id="persona-text">
+        No persona generated yet. Hit <span class="hint-keyword">INJECT NOISE</span> to begin.
+      </p>
+    </section>
+
+    <!-- ─── ACTIVE QUERIES ────────────────────────────────────── -->
+    <section class="card" aria-label="Injected search queries">
+      <div class="card__header">
+        <h2 class="card__title">
+          <!-- Search icon -->
+          <svg class="card__title-icon text-orange" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/>
+          </svg>
+          Injected Search Queries
+        </h2>
+      </div>
+      <ul class="query-list" id="query-list" aria-live="polite">
+        <li class="query-list--empty">No queries yet…</li>
+      </ul>
+    </section>
+
+    <!-- ─── ERROR PANEL (hidden by default) ──────────────────── -->
+    <section class="error-panel hidden" id="error-panel" role="alert" aria-live="assertive">
+      <div class="error-panel__inner">
+        <!-- Info icon -->
+        <svg class="error-panel__icon" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+        </svg>
+        <span id="error-text"></span>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  INJECT NOISE BUTTON                                        -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <footer>
+    <button class="trigger-btn" id="trigger-btn" type="button">
+      <!-- Lightning bolt — shown when idle -->
+      <svg id="btn-icon-idle" class="trigger-btn__icon" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+        <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/>
+      </svg>
+      <!-- Spinner — shown while running -->
+      <svg id="btn-icon-spin" class="trigger-btn__icon trigger-btn__icon--spin hidden" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+        <circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      <span id="btn-label">Inject Noise</span>
+    </button>
+
+    <p class="version-tag">v1.0.0 · localhost:8000 · MV3</p>
+  </footer>
+
+  <!-- All JS is external — no inline scripts -->
+  <script src="popup.js"></script>
+</body>
+</html>

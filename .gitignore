@@ -1,0 +1,22 @@
+# Secrets — never commit!
+.env
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+doppelganger
+
+# Test artifacts
+*.test
+*.out
+
+# Go module cache
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
