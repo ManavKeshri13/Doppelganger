@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Project Doppelgänger</title>
-  <!-- Local CSS only — no external scripts, no inline scripts, MV3-compliant -->
+  <title>Project Aegis — Dark Pattern Detector</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,11 +13,11 @@
   <!-- ═══════════════════════════════════════════════════════════ -->
   <header class="top-bar">
     <div class="top-bar__brand">
-      <!-- Ghost icon -->
+      <!-- Shield icon -->
       <svg class="top-bar__icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M12 2C7.03 2 3 6.03 3 11v9l3-2 3 2 3-2 3 2 3-2v-9c0-4.97-4.03-9-9-9zm-3 10a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm6 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z"/>
+        <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 4l6 2.67V11c0 3.78-2.58 7.26-6 8.29C8.58 18.26 6 14.78 6 11V7.67L12 5z"/>
       </svg>
-      <span class="top-bar__title">Doppelgänger</span>
+      <span class="top-bar__title">Aegis</span>
     </div>
 
     <!-- Live connection indicator -->
@@ -36,7 +35,7 @@
     <!-- ─── STATUS CARD ──────────────────────────────────────── -->
     <section class="card" aria-label="Engine status">
       <div class="card__header">
-        <h2 class="card__title">Engine Status</h2>
+        <h2 class="card__title">Scan Status</h2>
         <span class="status-badge status-badge--idle" id="status-badge">IDLE</span>
       </div>
 
@@ -48,52 +47,52 @@
       <!-- Stat grid -->
       <div class="stat-grid">
         <div class="stat-box">
-          <p class="stat-label">Queries Injected</p>
-          <p class="stat-value" id="stat-total">0</p>
+          <p class="stat-label">Risk Score</p>
+          <p class="stat-value stat-value--risk" id="stat-risk">—</p>
         </div>
         <div class="stat-box">
-          <p class="stat-label">Last Trigger</p>
-          <p class="stat-value stat-value--sm" id="stat-time">—</p>
+          <p class="stat-label">Total Scans</p>
+          <p class="stat-value" id="stat-total">0</p>
         </div>
       </div>
     </section>
 
-    <!-- ─── ACTIVE PERSONA ────────────────────────────────────── -->
-    <section class="card" aria-label="Active persona">
+    <!-- ─── DATA HARVESTING SUMMARY ──────────────────────────── -->
+    <section class="card" aria-label="Data harvesting summary">
       <div class="card__header">
         <h2 class="card__title">
-          <!-- User icon -->
+          <!-- Eye icon -->
           <svg class="card__title-icon text-cyan" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
+            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+            <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
           </svg>
-          Active Persona
+          Data Harvesting Summary
         </h2>
       </div>
-      <p class="persona-text" id="persona-text">
-        No persona generated yet. Hit <span class="hint-keyword">INJECT NOISE</span> to begin.
+      <p class="persona-text" id="summary-text">
+        No scan performed yet. Hit <span class="hint-keyword">SCAN PAGE RISKS</span> to analyse the current tab.
       </p>
     </section>
 
-    <!-- ─── ACTIVE QUERIES ────────────────────────────────────── -->
-    <section class="card" aria-label="Injected search queries">
+    <!-- ─── DETECTED DARK PATTERNS ───────────────────────────── -->
+    <section class="card" aria-label="Detected dark patterns">
       <div class="card__header">
         <h2 class="card__title">
-          <!-- Search icon -->
-          <svg class="card__title-icon text-orange" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/>
+          <!-- Warning icon -->
+          <svg class="card__title-icon text-orange" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
           </svg>
-          Injected Search Queries
+          Detected Dark Patterns
         </h2>
       </div>
-      <ul class="query-list" id="query-list" aria-live="polite">
-        <li class="query-list--empty">No queries yet…</li>
+      <ul class="query-list" id="pattern-list" aria-live="polite">
+        <li class="query-list--empty">No patterns detected yet…</li>
       </ul>
     </section>
 
     <!-- ─── ERROR PANEL (hidden by default) ──────────────────── -->
     <section class="error-panel hidden" id="error-panel" role="alert" aria-live="assertive">
       <div class="error-panel__inner">
-        <!-- Info icon -->
         <svg class="error-panel__icon" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
           <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
         </svg>
@@ -104,26 +103,25 @@
   </main>
 
   <!-- ═══════════════════════════════════════════════════════════ -->
-  <!--  INJECT NOISE BUTTON                                        -->
+  <!--  SCAN BUTTON                                                -->
   <!-- ═══════════════════════════════════════════════════════════ -->
   <footer>
     <button class="trigger-btn" id="trigger-btn" type="button">
-      <!-- Lightning bolt — shown when idle -->
+      <!-- Shield scan icon — shown when idle -->
       <svg id="btn-icon-idle" class="trigger-btn__icon" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-        <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/>
+        <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
       </svg>
-      <!-- Spinner — shown while running -->
+      <!-- Spinner — shown while scanning -->
       <svg id="btn-icon-spin" class="trigger-btn__icon trigger-btn__icon--spin hidden" fill="none" viewBox="0 0 24 24" aria-hidden="true">
         <circle style="opacity:0.25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path style="opacity:0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
       </svg>
-      <span id="btn-label">Inject Noise</span>
+      <span id="btn-label">Scan Page Risks</span>
     </button>
 
-    <p class="version-tag">v1.0.0 · localhost:8000 · MV3</p>
+    <p class="version-tag">v2.0.0 · Project Aegis · localhost:8000 · MV3</p>
   </footer>
 
-  <!-- All JS is external — no inline scripts -->
   <script src="popup.js"></script>
 </body>
 </html>

@@ -1,10 +1,10 @@
-// server.go — Project Doppelgänger
+// server.go — Project Aegis
 //
 // Local REST API server built on net/http.
 // Exposes two endpoints consumed by the Chrome extension:
 //
-//   GET  /status   – live engine metrics (persona, counters, phase)
-//   POST /trigger  – fire a new noise-injection session asynchronously
+//   GET  /status   – live engine metrics (risk score, dark patterns, phase)
+//   POST /analyze  – submit page text for dark-pattern analysis (async)
 //
 // CORS middleware is included so the Chrome extension (chrome-extension://...)
 // and any local dev page can call the API without browser CORS errors.
@@ -13,6 +13,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -24,16 +25,22 @@ import (
 
 // StatusResponse is the JSON body returned by GET /status.
 type StatusResponse struct {
-	Status               string    `json:"status"`
-	ActivePersona        string    `json:"activePersona"`
-	ActiveQueries        []string  `json:"activeQueries"`
-	TotalQueriesInjected int       `json:"totalQueriesInjected"`
-	LastTriggerTime      time.Time `json:"lastTriggerTime"`
-	LastError            string    `json:"lastError,omitempty"`
+	Status       string    `json:"status"`
+	RiskScore    int       `json:"riskScore"`
+	DarkPatterns []string  `json:"darkPatterns"`
+	Summary      string    `json:"summary"`
+	TotalScans   int       `json:"totalScans"`
+	LastScanTime time.Time `json:"lastScanTime"`
+	LastError    string    `json:"lastError,omitempty"`
 }
 
-// TriggerResponse is the JSON body returned by POST /trigger.
-type TriggerResponse struct {
+// AnalyzeRequest is the JSON body expected by POST /analyze.
+type AnalyzeRequest struct {
+	PageText string `json:"page_text"`
+}
+
+// AnalyzeResponse is the JSON body returned by POST /analyze.
+type AnalyzeResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
@@ -83,11 +90,11 @@ func (s *Server) Run(addr string) error {
 // ---------------------------------------------------------------------------
 
 func (s *Server) registerRoutes() {
-	// Health / meta
+	// Health / status polling
 	s.mux.HandleFunc("/status", s.handleStatus)
 
-	// Main action endpoint
-	s.mux.HandleFunc("/trigger", s.handleTrigger)
+	// Main analysis endpoint
+	s.mux.HandleFunc("/analyze", s.handleAnalyze)
 
 	// Catch-all for unknown routes
 	s.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -110,13 +117,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, snap)
 }
 
-// handleTrigger responds to POST /trigger.
+// handleAnalyze responds to POST /analyze.
 //
-// The actual LLM call + browser automation is dispatched in a goroutine so
-// that the HTTP response returns immediately (the extension polls /status for
-// progress).  If the engine is already running, the request is rejected with
-// 409 Conflict.
-func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
+// The actual LLM call is dispatched in a goroutine so the HTTP response
+// returns immediately (the extension polls /status for progress).
+// If an analysis is already running, the request is rejected with 409 Conflict.
+func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "method not allowed"})
 		return
@@ -124,65 +130,66 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 
 	// Guard: refuse concurrent sessions
 	snap := s.state.Snapshot()
-	if snap.Status == string(StatusRunning) {
-		writeJSON(w, http.StatusConflict, TriggerResponse{
+	if snap.Status == string(StatusAnalyzing) {
+		writeJSON(w, http.StatusConflict, AnalyzeResponse{
 			Success: false,
-			Message: "A noise-injection session is already running. Please wait.",
+			Message: "An analysis is already running. Please wait.",
 		})
 		return
 	}
 
-	// Acknowledge the request immediately
-	writeJSON(w, http.StatusAccepted, TriggerResponse{
+	// Read and parse the request body
+	body, err := io.ReadAll(io.LimitReader(r.Body, 2<<20)) // 2 MB limit
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "failed to read request body"})
+		return
+	}
+
+	var req AnalyzeRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid JSON body"})
+		return
+	}
+
+	if req.PageText == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "page_text is required"})
+		return
+	}
+
+	log.Printf("[SERVER] /analyze received — page text: %d chars", len(req.PageText))
+
+	// Acknowledge immediately; analysis runs in background
+	writeJSON(w, http.StatusAccepted, AnalyzeResponse{
 		Success: true,
-		Message: "🕵️ Noise injection initiated. Poll /status for progress.",
+		Message: "🔍 Analysis started. Poll /status for results.",
 	})
 
-	// Run the heavy lifting in the background
-	go s.runNoiseSession()
+	// Run the LLM analysis in the background
+	go s.runAnalysisSession(req.PageText)
 }
 
 // ---------------------------------------------------------------------------
-// Noise session orchestration
+// Analysis session orchestration
 // ---------------------------------------------------------------------------
 
-// runNoiseSession is the goroutine that:
-//  1. Calls the LLM to generate a persona + queries
-//  2. Hands off to the browser automation engine (Phase 2)
-//  3. Updates EngineState throughout
-func (s *Server) runNoiseSession() {
-	log.Println("[ENGINE] 🚀 Starting noise session...")
+// runAnalysisSession is the goroutine that:
+//  1. Marks state as "analyzing"
+//  2. Calls the LLM to detect dark patterns
+//  3. Stores the results back into EngineState
+func (s *Server) runAnalysisSession(pageText string) {
+	log.Println("[ENGINE] 🔍 Starting dark-pattern analysis...")
+	s.state.SetAnalyzing()
 
-	// --- Step 1: Generate persona and queries via LLM ---
-	payload, err := GeneratePersonaAndQueries(s.cfg)
+	payload, err := AnalyzePage(s.cfg, pageText)
 	if err != nil {
 		log.Printf("[ENGINE] ❌ LLM error: %v", err)
 		s.state.SetError(err.Error())
 		return
 	}
 
-	// Trim queries to the configured limit (LLM might return more)
-	queries := payload.Queries
-	if len(queries) > s.cfg.QueriesPerSession {
-		queries = queries[:s.cfg.QueriesPerSession]
-	}
-
-	s.state.SetRunning(payload.Persona, queries)
-
-	// --- Step 2: Execute headless browsing (Phase 2 – browser.go) ---
-	injected, err := RunBrowsingSession(s.cfg, queries)
-	if err != nil {
-		log.Printf("[ENGINE] ❌ Browser error: %v", err)
-		s.state.SetError(err.Error())
-		return
-	}
-
-	// --- Step 3: Update counters and return to idle ---
-	s.state.IncrementInjected(injected)
-	s.state.SetIdle()
-
-	log.Printf("[ENGINE] ✅ Session complete – %d queries injected (total: %d)",
-		injected, s.state.Snapshot().TotalQueriesInjected)
+	s.state.SetResults(payload)
+	log.Printf("[ENGINE] ✅ Analysis complete — risk score: %d/10, patterns found: %d",
+		payload.RiskScore, len(payload.DarkPatterns))
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +200,6 @@ func (s *Server) runNoiseSession() {
 // (origin: chrome-extension://<id>) to communicate with the local server.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow any origin – this API is only reachable on localhost
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

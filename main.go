@@ -1,4 +1,4 @@
-// main.go — Project Doppelgänger
+// main.go — Project Aegis
 //
 // Entry point.  Loads .env, initialises the global state store,
 // and starts the local REST API server.
@@ -48,6 +48,13 @@ func main() {
 		headless = false
 	}
 
+	// Default to the standard Windows Chrome profile path;
+	// override via CHROME_USER_DATA_DIR in .env if needed.
+	chromeUserDataDir := os.Getenv("CHROME_USER_DATA_DIR")
+	if chromeUserDataDir == "" {
+		chromeUserDataDir = os.Getenv("LOCALAPPDATA") + `\Google\Chrome\User Data`
+	}
+
 	// ---------------------------------------------------------------
 	// 3. Build the application config
 	// ---------------------------------------------------------------
@@ -56,6 +63,7 @@ func main() {
 		ServerPort:        port,
 		QueriesPerSession: queriesPerSession,
 		BrowserHeadless:   headless,
+		ChromeUserDataDir: chromeUserDataDir,
 	}
 
 	// ---------------------------------------------------------------
@@ -68,9 +76,9 @@ func main() {
 	// 5. Start the API server (blocking)
 	// ---------------------------------------------------------------
 	addr := fmt.Sprintf(":%s", cfg.ServerPort)
-	log.Printf("[INFO] 🕵️  Project Doppelgänger running on http://localhost%s", addr)
+	log.Printf("[INFO] 🛡️  Project Aegis running on http://localhost%s", addr)
 	log.Printf("[INFO] LLM provider : Groq / llama-3.3-70b-versatile")
-	log.Printf("[INFO] Headless mode: %v", cfg.BrowserHeadless)
+	log.Printf("[INFO] Mode        : Dark Pattern & Privacy Risk Analyser")
 
 	if err := server.Run(addr); err != nil {
 		log.Fatalf("[FATAL] Server error: %v", err)

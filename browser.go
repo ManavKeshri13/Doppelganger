@@ -38,6 +38,21 @@ func RunBrowsingSession(cfg *Config, queries []string) (int, error) {
 		allocOpts = removeHeadlessFlags(allocOpts)
 	}
 
+	// If a real Chrome profile dir is configured, attach to it so that
+	// all visited URLs land in the user's actual browser history.
+	// NOTE: Chrome cannot run a profile in headless mode while it is also
+	// open normally, so we force non-headless when a profile is supplied.
+	if cfg.ChromeUserDataDir != "" {
+		log.Printf("[BROWSER] Using real Chrome profile: %s", cfg.ChromeUserDataDir)
+		allocOpts = removeHeadlessFlags(allocOpts) // force visible / non-headless
+		allocOpts = append(allocOpts,
+			chromedp.UserDataDir(cfg.ChromeUserDataDir),
+			chromedp.Flag("profile-directory", "Default"),
+			chromedp.Flag("no-first-run", true),
+			chromedp.Flag("no-default-browser-check", true),
+		)
+	}
+
 	// Add extra stealth / realistic browser fingerprint flags
 	allocOpts = append(allocOpts,
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),

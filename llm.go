@@ -1,4 +1,4 @@
-// llm.go — Project Doppelgänger
+// llm.go — Project Aegis
 //
 // LLM integration layer — Groq (llama-3.3-70b-versatile).
 //
@@ -6,9 +6,10 @@
 // /v1/chat/completions), so we target it with a single thin
 // HTTP client.  No SDK dependency required.
 //
-// The sole exported function is GeneratePersonaAndQueries, which
-// asks the model to produce a realistic browsing persona and a
-// list of search queries that persona would plausibly run.
+// The sole exported function is AnalyzePage, which sends the
+// raw text of a webpage to the LLM and returns a structured
+// AnalysisPayload describing detected dark patterns and
+// privacy risks.
 
 package main
 
@@ -25,13 +26,14 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Shared types
+// Public types
 // ---------------------------------------------------------------------------
 
-// PersonaPayload is the canonical structure we expect the LLM to return.
-type PersonaPayload struct {
-	Persona string   `json:"persona"`
-	Queries []string `json:"queries"`
+// AnalysisPayload is the canonical structure the LLM returns for every scan.
+type AnalysisPayload struct {
+	RiskScore    int      `json:"risk_score"`
+	DarkPatterns []string `json:"dark_patterns"`
+	Summary      string   `json:"summary"`
 }
 
 // ---------------------------------------------------------------------------
@@ -39,33 +41,47 @@ type PersonaPayload struct {
 // ---------------------------------------------------------------------------
 
 // buildSystemPrompt returns the instruction that tells the LLM exactly what
-// JSON structure to produce.  n controls how many queries are requested.
-func buildSystemPrompt(n int) string {
-	return fmt.Sprintf(`You are a privacy-persona generator for an academic research tool.
-Your task is to produce a hyper-realistic synthetic internet user and a set of search
-queries they would naturally perform today.
+// to look for and what JSON structure to produce.
+func buildSystemPrompt() string {
+	return `You are an expert in digital privacy, UX ethics, and consumer protection.
+Your task is to analyse the text content of a webpage and identify "dark patterns"
+and privacy risks present in the content.
+
+Dark patterns to look for include (but are not limited to):
+- Trick questions or confusing double-negatives in consent forms
+- Hidden subscription auto-renewals or pre-ticked opt-in boxes
+- Guilt-trip or shaming language on cancel/decline buttons ("No thanks, I hate saving money")
+- Urgency or scarcity manipulation ("Only 1 left!", countdown timers that reset)
+- Roach motel: easy to sign up, hidden/difficult cancellation
+- Privacy Zuckering: confusing privacy settings designed to maximise data sharing
+- Misdirection: visual design that draws attention away from important information
+- Disguised ads presented as organic content
+- Excessive data collection requests (location, contacts, camera) beyond what is needed
+- Tracking pixels, fingerprinting scripts, or third-party data sharing references
 
 STRICT RULES:
 1. Return ONLY a single valid JSON object – no markdown fences, no prose, no explanation.
 2. The JSON must follow this exact schema:
    {
-     "persona": "<A detailed, realistic demographic description, e.g. '34-year-old freelance graphic designer in Austin, TX, interested in typography, home espresso brewing, and Formula 1 racing'>",
-     "queries": ["<query 1>", "<query 2>", ..., "<query %d>"]
+     "risk_score": <integer 1-10, where 1 = very safe, 10 = extremely manipulative>,
+     "dark_patterns": ["<pattern 1>", "<pattern 2>", ...],
+     "summary": "<A 1-3 sentence plain-English summary of the key privacy risks and manipulative techniques found>"
    }
-3. Queries must be natural, varied, and plausible for the persona – mix of
-   informational, navigational, and commercial intent.
-4. Do NOT include anything outside the JSON object.`, n)
+3. If no dark patterns are found, return an empty array for dark_patterns and a risk_score of 1-2.
+4. Be specific and factual — only flag patterns you can directly infer from the text.
+5. Do NOT include anything outside the JSON object.`
 }
 
 // ---------------------------------------------------------------------------
 // Main exported function
 // ---------------------------------------------------------------------------
 
-// GeneratePersonaAndQueries calls the Groq API and returns a populated
-// PersonaPayload containing a synthetic persona and search queries.
-func GeneratePersonaAndQueries(cfg *Config) (*PersonaPayload, error) {
-	log.Printf("[LLM] Requesting persona from Groq (model: llama-3.3-70b-versatile)")
-	return callGroq(cfg)
+// AnalyzePage calls the Groq API with the given page text and returns a
+// populated AnalysisPayload describing detected dark patterns and privacy risks.
+func AnalyzePage(cfg *Config, pageText string) (*AnalysisPayload, error) {
+	log.Printf("[LLM] Requesting dark-pattern analysis from Groq (model: llama-3.3-70b-versatile)")
+	log.Printf("[LLM] Page text length: %d chars", len(pageText))
+	return callGroq(cfg, pageText)
 }
 
 // ---------------------------------------------------------------------------
@@ -75,15 +91,16 @@ func GeneratePersonaAndQueries(cfg *Config) (*PersonaPayload, error) {
 const (
 	groqEndpoint = "https://api.groq.com/openai/v1/chat/completions"
 	groqModel    = "llama-3.3-70b-versatile"
+	// Cap page text to avoid exceeding the model's context window.
+	maxPageTextChars = 12000
 )
 
 // groqRequest is the request body for the OpenAI-compatible completions API.
 type groqRequest struct {
-	Model       string        `json:"model"`
-	Messages    []groqMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
-	// Ask the model to return valid JSON — supported by Groq's Llama endpoint
+	Model          string              `json:"model"`
+	Messages       []groqMessage       `json:"messages"`
+	Temperature    float64             `json:"temperature"`
+	MaxTokens      int                 `json:"max_tokens"`
 	ResponseFormat *groqResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -108,22 +125,26 @@ type groqResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func callGroq(cfg *Config) (*PersonaPayload, error) {
+func callGroq(cfg *Config, pageText string) (*AnalysisPayload, error) {
+	// Truncate page text to stay within token limits
+	if len(pageText) > maxPageTextChars {
+		pageText = pageText[:maxPageTextChars] + "\n\n[... content truncated for analysis ...]"
+	}
+
 	reqBody := groqRequest{
 		Model: groqModel,
 		Messages: []groqMessage{
 			{
 				Role:    "system",
-				Content: buildSystemPrompt(cfg.QueriesPerSession),
+				Content: buildSystemPrompt(),
 			},
 			{
 				Role:    "user",
-				Content: "Generate a new persona and search queries now.",
+				Content: "Analyse the following webpage text for dark patterns and privacy risks:\n\n" + pageText,
 			},
 		},
-		Temperature: 0.9,
-		MaxTokens:   512,
-		// Instruct the model to guarantee a JSON object in its output
+		Temperature:    0.2, // Low temperature for consistent, factual analysis
+		MaxTokens:      1024,
 		ResponseFormat: &groqResponseFormat{Type: "json_object"},
 	}
 
@@ -147,7 +168,7 @@ func callGroq(cfg *Config) (*PersonaPayload, error) {
 	}
 
 	text := resp.Choices[0].Message.Content
-	return parsePersonaJSON(text)
+	return parseAnalysisJSON(text)
 }
 
 // ---------------------------------------------------------------------------
@@ -189,9 +210,9 @@ func postJSON(url string, body any, headers map[string]string) ([]byte, error) {
 // jsonFenceRe strips optional ``` fences that some models add despite instructions.
 var jsonFenceRe = regexp.MustCompile("(?s)```(?:json)?\\s*(\\{.*?\\})\\s*```")
 
-// parsePersonaJSON extracts a PersonaPayload from the LLM's raw text output.
+// parseAnalysisJSON extracts an AnalysisPayload from the LLM's raw text output.
 // It handles both bare JSON and JSON wrapped in markdown code fences.
-func parsePersonaJSON(text string) (*PersonaPayload, error) {
+func parseAnalysisJSON(text string) (*AnalysisPayload, error) {
 	text = strings.TrimSpace(text)
 
 	// Strip markdown fences if present
@@ -199,19 +220,27 @@ func parsePersonaJSON(text string) (*PersonaPayload, error) {
 		text = matches[1]
 	}
 
-	var payload PersonaPayload
+	var payload AnalysisPayload
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal LLM JSON: %w\nRaw text: %s", err, text)
 	}
 
-	if payload.Persona == "" {
-		return nil, fmt.Errorf("LLM returned empty persona field")
+	// Clamp risk score to valid range
+	if payload.RiskScore < 1 {
+		payload.RiskScore = 1
 	}
-	if len(payload.Queries) == 0 {
-		return nil, fmt.Errorf("LLM returned no queries")
+	if payload.RiskScore > 10 {
+		payload.RiskScore = 10
 	}
 
-	log.Printf("[LLM] ✓ Persona: %s", payload.Persona)
-	log.Printf("[LLM] ✓ Queries (%d): %v", len(payload.Queries), payload.Queries)
+	// Ensure dark_patterns is never nil (use empty slice for clean JSON)
+	if payload.DarkPatterns == nil {
+		payload.DarkPatterns = []string{}
+	}
+
+	log.Printf("[LLM] ✓ Risk Score: %d/10", payload.RiskScore)
+	log.Printf("[LLM] ✓ Dark Patterns (%d): %v", len(payload.DarkPatterns), payload.DarkPatterns)
+	log.Printf("[LLM] ✓ Summary: %s", payload.Summary)
+
 	return &payload, nil
 }

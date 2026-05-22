@@ -1,24 +1,30 @@
 {
   "manifest_version": 3,
-  "name": "Project Doppelgänger",
-  "version": "1.0.0",
-  "description": "Offensive privacy engine — inject synthetic browsing noise to poison tracker profiles.",
+  "name": "Project Aegis — Dark Pattern Detector",
+  "version": "2.0.0",
+  "description": "Scan any webpage for dark patterns and privacy risks using Groq LLM analysis.",
+
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+
+  "host_permissions": [
+    "http://localhost:8000/*"
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
   "icons": {
     "16":  "icons/icon16.png",
     "48":  "icons/icon48.png",
     "128": "icons/icon128.png"
-  },
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "Project Doppelgänger"
-  },
-  "permissions": [
-    "storage"
-  ],
-  "host_permissions": [
-    "http://localhost:8000/*"
-  ],
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
   }
 }

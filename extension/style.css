@@ -1,5 +1,5 @@
 /* =============================================================
-   style.css — Project Doppelgänger Chrome Extension
+   style.css — Project Aegis Chrome Extension
    Pure vanilla CSS. No CDN. No inline styles.
    MV3-compliant: loaded via <link> in popup.html.
    ============================================================= */
@@ -341,6 +341,13 @@ main {
   text-shadow: 0 0 6px var(--clr-green);
 }
 
+.status-badge--analyzing {
+  color: var(--clr-cyan);
+  border-color: var(--clr-cyan);
+  text-shadow: 0 0 6px var(--clr-cyan);
+  animation: pulseGlow 1.2s ease-in-out infinite;
+}
+
 .status-badge--error {
   color: var(--clr-red);
   border-color: var(--clr-red);
@@ -394,6 +401,16 @@ main {
   line-height: 1;
   color: var(--clr-green);
   text-shadow: 0 0 6px var(--clr-green), 0 0 12px var(--clr-green);
+}
+
+/* Risk score — colour is overridden dynamically by JS based on severity */
+.stat-value--risk {
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--txt-muted);
+  transition: color var(--transition-med), text-shadow var(--transition-med);
 }
 
 .stat-value--sm {

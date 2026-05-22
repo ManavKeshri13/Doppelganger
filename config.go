@@ -22,4 +22,11 @@ type Config struct {
 	// BrowserHeadless controls whether chromedp runs in headless mode.
 	// Set to false during development to watch the browser work.
 	BrowserHeadless bool
+
+	// ChromeUserDataDir is the path to your real Chrome profile directory.
+	// When set, chromedp will launch Chrome with that profile so all visited
+	// URLs appear in your actual browser history.
+	// Example (Windows): C:\Users\YourName\AppData\Local\Google\Chrome\User Data
+	// Leave empty to use a fresh temporary profile (default / old behaviour).
+	ChromeUserDataDir string
 }
