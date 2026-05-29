@@ -1,382 +1,521 @@
-/**
- * popup.js — Project Aegis + Gatekeeper
- *
- * Responsibilities:
- *  - Poll GET /status every 2 s to keep the dashboard live.
- *  - Load / persist the user's consent rules via chrome.storage.local.
- *  - Handle "Scan Page Risks":
- *      1. Extract document.body.innerText from the active tab via chrome.scripting
- *      2. POST { page_text, consent_rules } to /analyze
- *  - Render Risk Score, Dark Patterns, Summary, and the Gatekeeper
- *    violation banner when consent boundaries are breached.
- *
- * MV3-compliant: no inline scripts, no eval.
- */
-
 'use strict';
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+/* ==========================================================
+   AEGIS v3
+   Clean UI Controller
+   ========================================================== */
 
-const API_BASE         = 'http://localhost:8000';
-const POLL_INTERVAL    = 2000; // ms
-const STATUS_ENDPOINT  = `${API_BASE}/status`;
+const API_BASE = 'http://localhost:8000';
+
+const STATUS_ENDPOINT = `${API_BASE}/status`;
 const ANALYZE_ENDPOINT = `${API_BASE}/analyze`;
-const STORAGE_KEY      = 'aegis_consent_rules';
 
-// Risk score colour thresholds
-const RISK_LOW    = 3;  // 1-3  → green
-const RISK_MEDIUM = 6;  // 4-6  → orange
-                        // 7-10 → red
+const POLL_INTERVAL = 2000;
+const STORAGE_KEY = 'aegis_consent_rules';
 
-// ─── DOM refs ─────────────────────────────────────────────────────────────────
+/* ==========================================================
+   DOM HELPERS
+   ========================================================== */
 
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-const connDot          = $('conn-dot');
-const connLabel        = $('conn-label');
-const statusBadge      = $('status-badge');
-const phaseBar         = $('phase-bar');
-const statRisk         = $('stat-risk');
-const statTotal        = $('stat-total');
-const consentRulesEl   = $('consent-rules');
-const personaSavedBadge = $('persona-saved-badge');
-const summaryText      = $('summary-text');
-const patternList      = $('pattern-list');
-const violationAlert   = $('violation-alert');
-const violationDetail  = $('violation-detail');
-const errorPanel       = $('error-panel');
-const errorText        = $('error-text');
-const triggerBtn       = $('trigger-btn');
-const btnLabel         = $('btn-label');
-const btnIconIdle      = $('btn-icon-idle');
-const btnIconSpin      = $('btn-icon-spin');
+/* ==========================================================
+   DOM REFERENCES
+   ========================================================== */
 
-// ─── App state ────────────────────────────────────────────────────────────────
+const connDot = $('conn-dot');
+const connLabel = $('conn-label');
 
-let isConnected   = false;
+const statRisk = $('stat-risk');
+const statTotal = $('stat-total');
+
+const riskLabel = $('risk-label');
+const riskDescription = $('risk-description');
+const riskTag = $('risk-tag');
+
+const summaryText = $('summary-text');
+
+const patternList = $('pattern-list');
+const patternCount = $('pattern-count');
+
+const consentRulesEl = $('consent-rules');
+const savedBadge = $('persona-saved-badge');
+
+const violationAlert = $('violation-alert');
+const violationDetail = $('violation-detail');
+
+const errorPanel = $('error-panel');
+const errorText = $('error-text');
+
+const triggerBtn = $('trigger-btn');
+const btnLabel = $('btn-label');
+const btnIconIdle = $('btn-icon-idle');
+const btnIconSpin = $('btn-icon-spin');
+
+/* ==========================================================
+   STATE
+   ========================================================== */
+
 let currentStatus = 'idle';
+let isConnected = false;
 
-// ─── Persist consent rules ────────────────────────────────────────────────────
+/* ==========================================================
+   CONSENT STORAGE
+   ========================================================== */
 
-/** Load saved consent rules from chrome.storage.local on startup. */
 async function loadConsentRules() {
   try {
     const result = await chrome.storage.local.get(STORAGE_KEY);
+
     if (result[STORAGE_KEY]) {
       consentRulesEl.value = result[STORAGE_KEY];
     }
-  } catch (_) {
-    // Storage unavailable — silently ignore
+  } catch (err) {
+    console.error(err);
   }
 }
 
-/** Save consent rules whenever the textarea loses focus or changes. */
 let saveTimer = null;
+
 consentRulesEl.addEventListener('input', () => {
+
   clearTimeout(saveTimer);
+
   saveTimer = setTimeout(async () => {
+
     try {
-      await chrome.storage.local.set({ [STORAGE_KEY]: consentRulesEl.value });
+
+      await chrome.storage.local.set({
+        [STORAGE_KEY]: consentRulesEl.value
+      });
+
       flashSavedBadge();
-    } catch (_) {}
-  }, 600); // debounce — save 600 ms after user stops typing
+
+    } catch (err) {
+      console.error(err);
+    }
+
+  }, 500);
+
 });
 
 function flashSavedBadge() {
-  personaSavedBadge.classList.remove('hidden');
-  clearTimeout(flashSavedBadge._timer);
-  flashSavedBadge._timer = setTimeout(() => {
-    personaSavedBadge.classList.add('hidden');
+
+  savedBadge.classList.remove('hidden');
+
+  clearTimeout(flashSavedBadge.timer);
+
+  flashSavedBadge.timer = setTimeout(() => {
+    savedBadge.classList.add('hidden');
   }, 1800);
 }
 
-// ─── Polling ──────────────────────────────────────────────────────────────────
+/* ==========================================================
+   CONNECTION STATUS
+   ========================================================== */
 
-async function pollStatus() {
-  try {
-    const res = await fetch(STATUS_ENDPOINT, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(3000),
-    });
+function setConnected(connected) {
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+  if (connected === isConnected) return;
 
-    setConnected(true);
-    renderStatus(data);
-  } catch (_err) {
-    setConnected(false);
-    if (currentStatus === 'analyzing') renderBtnState('idle');
+  isConnected = connected;
+
+  if (connected) {
+
+    connDot.className = 'status-dot conn-dot--online';
+    connLabel.textContent = 'Connected';
+
+  } else {
+
+    connDot.className = 'status-dot conn-dot--offline';
+    connLabel.textContent = 'Offline';
+
   }
 }
 
-/** Renders the entire dashboard from a /status payload. */
-function renderStatus(data) {
-  currentStatus = data.status;
+/* ==========================================================
+   STATUS POLLING
+   ========================================================== */
 
-  renderStatusBadge(data.status);
-  renderPhaseBar(data.status);
-  renderRiskScore(data.riskScore, data.status);
+async function pollStatus() {
+
+  try {
+
+    const response = await fetch(STATUS_ENDPOINT, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json'
+      },
+      signal: AbortSignal.timeout(3000)
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    setConnected(true);
+
+    renderDashboard(data);
+
+  } catch (err) {
+
+    setConnected(false);
+
+    if (currentStatus === 'analyzing') {
+      renderButtonState('idle');
+    }
+  }
+}
+
+/* ==========================================================
+   DASHBOARD RENDER
+   ========================================================== */
+
+function renderDashboard(data) {
+
+  currentStatus = data.status || 'idle';
+
+  renderRisk(data.riskScore);
+  renderSummary(data.summary);
+  renderPatterns(data.darkPatterns || []);
 
   statTotal.textContent = data.totalScans ?? 0;
 
-  renderSummary(data.summary, data.status);
-  renderPatternList(data.darkPatterns || []);
-  renderViolationAlert(data.consentViolated, data.violationDetails);
+  renderViolation(
+    data.consentViolated,
+    data.violationDetails
+  );
 
   if (data.status === 'error' && data.lastError) {
+
     showError(data.lastError);
+
   } else {
+
     hideError();
   }
 
-  renderBtnState(data.status);
+  renderButtonState(data.status);
 }
 
-// ─── Consent Violation Alert ─────────────────────────────────────────────────
+/* ==========================================================
+   RISK SCORE
+   ========================================================== */
 
-function renderViolationAlert(violated, details) {
-  if (violated) {
-    violationDetail.textContent = details || 'A consent boundary was crossed by this page.';
-    violationAlert.classList.remove('hidden');
-  } else {
-    violationAlert.classList.add('hidden');
-    violationDetail.textContent = '';
-  }
-}
+function renderRisk(score) {
 
-// ─── Risk Score ───────────────────────────────────────────────────────────────
-
-function renderRiskScore(score, status) {
-  if (status === 'analyzing') {
-    statRisk.textContent = '…';
-    statRisk.style.color = 'var(--clr-cyan)';
-    statRisk.style.textShadow = '0 0 6px var(--clr-cyan)';
-    return;
-  }
   if (!score) {
+
     statRisk.textContent = '—';
-    statRisk.style.color = 'var(--txt-muted)';
-    statRisk.style.textShadow = 'none';
+
+    riskLabel.textContent = 'Run a Scan';
+
+    riskDescription.textContent =
+      'Analyze this website to identify privacy and UX risks.';
+
+    riskTag.textContent = 'Not Scanned';
+
     return;
   }
 
-  statRisk.textContent = `${score}/10`;
+  statRisk.textContent = score;
 
-  if (score <= RISK_LOW) {
-    statRisk.style.color = 'var(--clr-green)';
-    statRisk.style.textShadow = '0 0 6px var(--clr-green), 0 0 12px var(--clr-green)';
-  } else if (score <= RISK_MEDIUM) {
-    statRisk.style.color = 'var(--clr-orange)';
-    statRisk.style.textShadow = '0 0 6px var(--clr-orange), 0 0 12px var(--clr-orange)';
+  if (score <= 3) {
+
+    riskLabel.textContent = 'Low Risk';
+
+    riskDescription.textContent =
+      'This website appears relatively safe.';
+
+    riskTag.textContent = 'Low';
+
+    riskTag.style.background = '#dcfce7';
+    riskTag.style.color = '#166534';
+
+  } else if (score <= 6) {
+
+    riskLabel.textContent = 'Medium Risk';
+
+    riskDescription.textContent =
+      'Some concerning privacy or UX practices detected.';
+
+    riskTag.textContent = 'Medium';
+
+    riskTag.style.background = '#fef3c7';
+    riskTag.style.color = '#92400e';
+
   } else {
-    statRisk.style.color = 'var(--clr-red)';
-    statRisk.style.textShadow = '0 0 6px var(--clr-red), 0 0 12px var(--clr-red)';
+
+    riskLabel.textContent = 'High Risk';
+
+    riskDescription.textContent =
+      'Multiple privacy or dark pattern concerns detected.';
+
+    riskTag.textContent = 'High';
+
+    riskTag.style.background = '#fee2e2';
+    riskTag.style.color = '#991b1b';
   }
 }
 
-// ─── Summary ──────────────────────────────────────────────────────────────────
+/* ==========================================================
+   SUMMARY
+   ========================================================== */
 
-function renderSummary(summary, status) {
-  if (status === 'analyzing') {
-    summaryText.textContent = '🔍 Analysing page with Groq LLM…';
-    summaryText.classList.remove('persona-text--active');
+function renderSummary(summary) {
+
+  if (!summary) {
+
+    summaryText.textContent =
+      'Run a scan to analyze this website.';
+
     return;
   }
-  if (summary) {
-    summaryText.textContent = summary;
-    summaryText.classList.add('persona-text--active');
-  } else {
-    summaryText.innerHTML = 'No scan performed yet. Hit <span class="hint-keyword">SCAN PAGE RISKS</span> to analyse the current tab.';
-    summaryText.classList.remove('persona-text--active');
-  }
+
+  summaryText.textContent = summary;
 }
 
-// ─── Dark Patterns list ───────────────────────────────────────────────────────
+/* ==========================================================
+   DARK PATTERNS
+   ========================================================== */
 
-function renderPatternList(patterns) {
-  if (!patterns || !patterns.length) {
-    patternList.innerHTML = '<li class="query-list--empty">No dark patterns detected yet…</li>';
+function renderPatterns(patterns) {
+
+  patternCount.textContent = patterns.length;
+
+  if (!patterns.length) {
+
+    patternList.innerHTML = `
+      <div class="empty-state">
+        No dark patterns detected.
+      </div>
+    `;
+
     return;
   }
 
   patternList.innerHTML = '';
-  patterns.forEach((p, i) => {
-    const li  = document.createElement('li');
-    li.className = 'query-item';
 
-    const idx = document.createElement('span');
-    idx.className = 'query-item__index';
-    idx.textContent = `[${String(i + 1).padStart(2, '0')}]`;
+  patterns.forEach(pattern => {
 
-    const txt = document.createElement('span');
-    txt.className = 'query-item__text';
-    txt.textContent = p;
-    txt.title = p;
+    const card = document.createElement('div');
 
-    li.appendChild(idx);
-    li.appendChild(txt);
-    patternList.appendChild(li);
+    card.className = 'pattern-card';
+
+    card.innerHTML = `
+      <div class="pattern-title">
+        ⚠ Potential Dark Pattern
+      </div>
+
+      <div class="pattern-text">
+        ${escapeHtml(pattern)}
+      </div>
+    `;
+
+    patternList.appendChild(card);
+
   });
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+/* ==========================================================
+   CONSENT VIOLATIONS
+   ========================================================== */
 
-const STATUS_CLASSES = { idle: true, analyzing: true, error: true };
+function renderViolation(violated, details) {
 
-function renderStatusBadge(status) {
-  const label = status === 'analyzing' ? 'SCANNING' : status.toUpperCase();
-  statusBadge.textContent = label;
-  statusBadge.className = `status-badge status-badge--${status in STATUS_CLASSES ? status : 'idle'}`;
-}
+  if (!violated) {
 
-// ─── Phase bar ────────────────────────────────────────────────────────────────
+    violationAlert.classList.add('hidden');
 
-const PHASE_BAR_WIDTHS = { idle: '0%', analyzing: '75%', error: '100%' };
-
-function renderPhaseBar(status) {
-  phaseBar.style.width = PHASE_BAR_WIDTHS[status] ?? '0%';
-
-  if (status === 'analyzing') {
-    phaseBar.style.background = 'var(--clr-cyan)';
-    phaseBar.style.boxShadow  = '0 0 10px var(--clr-cyan)';
-  } else if (status === 'error') {
-    phaseBar.style.background = 'var(--clr-red)';
-    phaseBar.style.boxShadow  = '0 0 10px var(--clr-red)';
-    setTimeout(() => { phaseBar.style.width = '0%'; }, 1500);
-  } else {
-    phaseBar.style.background = 'var(--clr-green)';
-    phaseBar.style.boxShadow  = '0 0 8px var(--clr-green)';
+    return;
   }
+
+  violationAlert.classList.remove('hidden');
+
+  violationDetail.textContent =
+    details ||
+    'This page violates one of your privacy preferences.';
 }
 
-// ─── Button state ─────────────────────────────────────────────────────────────
+/* ==========================================================
+   BUTTON STATE
+   ========================================================== */
 
-function renderBtnState(status) {
+function renderButtonState(status) {
+
   if (status === 'analyzing') {
+
     triggerBtn.disabled = true;
-    btnLabel.textContent = 'Scanning…';
+
+    btnLabel.textContent = 'Scanning...';
+
     btnIconIdle.classList.add('hidden');
     btnIconSpin.classList.remove('hidden');
-    triggerBtn.classList.add('trigger-btn--running');
+
   } else {
+
     triggerBtn.disabled = false;
-    btnLabel.textContent = 'Scan Page Risks';
+
+    btnLabel.textContent = 'Scan Page';
+
     btnIconIdle.classList.remove('hidden');
     btnIconSpin.classList.add('hidden');
-    triggerBtn.classList.remove('trigger-btn--running');
   }
 }
 
-// ─── Connection indicator ─────────────────────────────────────────────────────
+/* ==========================================================
+   ERRORS
+   ========================================================== */
 
-function setConnected(ok) {
-  if (ok === isConnected) return;
-  isConnected = ok;
+function showError(message) {
 
-  if (ok) {
-    connDot.className    = 'conn-dot conn-dot--online';
-    connLabel.textContent = 'connected';
-    connLabel.className   = 'conn-label conn-label--online';
-  } else {
-    connDot.className    = 'conn-dot conn-dot--offline';
-    connLabel.textContent = 'offline';
-    connLabel.className   = 'conn-label conn-label--offline';
-    summaryText.textContent = '⚠ Backend offline. Make sure the Go server is running on :8000.';
-    summaryText.classList.remove('persona-text--active');
-  }
-}
+  errorText.textContent = message;
 
-// ─── Error panel ──────────────────────────────────────────────────────────────
-
-function showError(msg) {
-  errorText.textContent = msg;
   errorPanel.classList.remove('hidden');
 }
 
 function hideError() {
+
   errorPanel.classList.add('hidden');
+
   errorText.textContent = '';
 }
 
-// ─── Scan button ──────────────────────────────────────────────────────────────
+/* ==========================================================
+   SCAN BUTTON
+   ========================================================== */
 
 triggerBtn.addEventListener('click', async () => {
-  if (triggerBtn.disabled) return;
-  hideError();
-  violationAlert.classList.add('hidden'); // reset previous violation
 
-  // ── Step 1: Get the active tab ────────────────────────────────────────────
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.id) {
-    showError('Could not identify the active tab.');
+  hideError();
+
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true
+  });
+
+  if (!tab?.id) {
+
+    showError('Unable to find active tab.');
+
     return;
   }
 
-  // Optimistic UI update
-  renderBtnState('analyzing');
-  renderStatusBadge('analyzing');
-  renderPhaseBar('analyzing');
+  renderButtonState('analyzing');
 
-  // ── Step 2: Extract page text via chrome.scripting ────────────────────────
   let pageText = '';
+
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => document.body.innerText,
-    });
-    pageText = results?.[0]?.result ?? '';
+
+    const results =
+      await chrome.scripting.executeScript({
+
+        target: {
+          tabId: tab.id
+        },
+
+        func: () => document.body.innerText
+      });
+
+    pageText =
+      results?.[0]?.result ?? '';
+
   } catch (err) {
-    showError(`Could not read page content: ${err.message}. Try on a regular http/https page.`);
-    renderBtnState('idle');
-    renderStatusBadge('idle');
-    renderPhaseBar('idle');
+
+    showError(
+      `Unable to read page content. ${err.message}`
+    );
+
+    renderButtonState('idle');
+
     return;
   }
 
   if (!pageText.trim()) {
-    showError('Page appears to be empty or unreadable.');
-    renderBtnState('idle');
-    renderStatusBadge('idle');
-    renderPhaseBar('idle');
+
+    showError('Page appears empty.');
+
+    renderButtonState('idle');
+
     return;
   }
 
-  // ── Step 3: POST to /analyze (with optional consent rules) ────────────────
-  const consentRules = consentRulesEl.value.trim();
-
   try {
-    const res = await fetch(ANALYZE_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page_text: pageText, consent_rules: consentRules }),
-      signal: AbortSignal.timeout(8000),
-    });
 
-    const data = await res.json();
+    const response =
+      await fetch(ANALYZE_ENDPOINT, {
 
-    if (!res.ok || !data.success) {
-      showError(data.message || data.error || `Server returned ${res.status}`);
-      if (res.status !== 409) {
-        renderBtnState('idle');
-        renderStatusBadge('idle');
-        renderPhaseBar('idle');
-      }
+        method: 'POST',
+
+        headers: {
+          'Content-Type': 'application/json'
+        },
+
+        body: JSON.stringify({
+
+          page_text: pageText,
+
+          consent_rules:
+            consentRulesEl.value.trim()
+        }),
+
+        signal: AbortSignal.timeout(10000)
+      });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success) {
+
+      showError(
+        data.message ||
+        data.error ||
+        'Analysis failed.'
+      );
+
+      renderButtonState('idle');
+
       return;
     }
 
-    // 202 Accepted — polling will deliver results within ~5-10 s
+    /*
+      Backend accepted scan.
+      Polling will update UI.
+    */
+
   } catch (err) {
-    showError(`Could not reach backend: ${err.message}`);
-    renderBtnState('idle');
-    renderStatusBadge('idle');
-    renderPhaseBar('idle');
+
+    showError(
+      `Backend connection failed: ${err.message}`
+    );
+
+    renderButtonState('idle');
   }
 });
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+/* ==========================================================
+   SECURITY
+   ========================================================== */
+
+function escapeHtml(text) {
+
+  const div = document.createElement('div');
+
+  div.textContent = text;
+
+  return div.innerHTML;
+}
+
+/* ==========================================================
+   BOOT
+   ========================================================== */
 
 loadConsentRules();
+
 pollStatus();
-setInterval(pollStatus, POLL_INTERVAL);
+
+setInterval(
+  pollStatus,
+  POLL_INTERVAL
+);

@@ -5,10 +5,11 @@
   "description": "Scan any webpage for dark patterns and privacy risks using Groq LLM analysis.",
 
   "permissions": [
-    "activeTab",
-    "scripting",
-    "storage"
-  ],
+  "activeTab",
+  "tabs",
+  "scripting",
+  "storage"
+],
 
   "host_permissions": [
     "http://localhost:8000/*"
